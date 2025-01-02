@@ -1,0 +1,11 @@
+MambaNLP/lm-evaluation-harness
+MambaNLP/build
+MambaNLP/mamba_ssm_orig
+MambaNLP/csrc
+MambaNLP/evals
+MambaNLP/benchmarks
+MambaNLP/assets
+
+**/*.pyc
+**/*.so
+**/*.egg-info
