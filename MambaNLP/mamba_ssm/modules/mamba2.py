@@ -63,14 +63,22 @@ class Mamba2(nn.Module, PyTorchModelHubMixin):
         sequence_parallel=True,
         device=None,
         dtype=None,
-        # compute_attn_matrix = False,
-        # old_attention = False,
-        # compute_attn_vector=False,
-        # ablate_attn_mat = False,
-        # ablate_attn_vec = False,
+        compute_attn_matrix = False,
+        old_attention = False,
+        compute_attn_vector=False,
+        ablate_attn_mat = False,
+        ablate_attn_vec = False,
     ):
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
+
+        # for attention calculation
+        self.compute_attn_matrix = compute_attn_matrix
+        self.ablate_attn_vec = ablate_attn_vec
+        self.old_attention = old_attention
+        self.compute_attn_vector = compute_attn_vector
+        self.ablate_attn_mat = ablate_attn_mat
+
         self.d_model = d_model
         self.d_state = d_state
         self.d_conv = d_conv
@@ -187,6 +195,7 @@ class Mamba2(nn.Module, PyTorchModelHubMixin):
         A = -torch.exp(self.A_log.float())  # (nheads) or (d_inner, d_state)
         dt_limit_kwargs = {} if self.dt_limit == (0.0, float("inf")) else dict(dt_limit=self.dt_limit)
         if self.use_mem_eff_path and inference_params is None:
+            # print("using mem eff path")
             out = mamba_split_conv1d_scan_combined(
                 zxbcdt,
                 rearrange(self.conv1d.weight, "d 1 w -> d w"),
