@@ -178,6 +178,35 @@ def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta
     out = out.to(dtype=dtype_in)
     return out if not return_last_state else (out, last_state)
 
+def compute_attn_matrix_fn(delta, delta_bias, A, B, C, L, x_shape, dtype=torch.float32):
+    dt = F.softplus(delta + delta_bias.unsqueeze(0).unsqueeze(-1))
+    dA = torch.exp(torch.einsum("bdl,dn->bldn", dt, A))
+    dB = torch.einsum("bdl,bnl->bldn", dt, B.squeeze(1))
+    AttnMatrixOverCLS = torch.zeros((x_shape[0], x_shape[1], x_shape[2], x_shape[2]),requires_grad=True).to(dtype).to(dA.device) #BHLL: L vectors per batch and channel
+    #cumulative_products = torch.cumprod(dA[:,1:,:,:], dim=1)
+    for r in range(L):
+        for c in range(r+1):
+            curr_C = C[:,:,:,r]
+            currA = torch.ones((dA.shape[0],dA.shape[2],dA.shape[3]),requires_grad=True, dtype = dtype).to(dA.device)
+            if c < r:
+                for i in range(r-c):
+                    currA = currA*dA[:,r-i,:,:]
+            currB = dB[:,c,:,:]
+            AttnMatrixOverCLS[:,:,r,c] = torch.sum(curr_C*currA*currB, axis=-1)
+    return AttnMatrixOverCLS
+
+def conv2Mat(conv1d_weight, L): # convolution over matrix
+    H, D = conv1d_weight.shape
+    conv1d_weight = torch.flip(conv1d_weight,[-1])
+    # Initialize the matrix with zeros
+    M = torch.zeros(H, L, L).to(conv1d_weight.device)
+    
+    # Fill the matrix with the kernel weights
+    for h in range(H):
+        for i in range(L):
+            # Set the diagonal and the next (D-1) positions, respecting the input length L
+            M[h, i, i:i+D] = conv1d_weight[h, :max(0, D - (i + D - L))]
+    return M
 
 class MambaInnerFn(torch.autograd.Function):
 
@@ -261,6 +290,42 @@ class MambaInnerFn(torch.autograd.Function):
         out, scan_intermediates, out_z = selective_scan_cuda.fwd(
             conv1d_out, delta, A, B, C, D, z, delta_bias, delta_softplus
         )
+
+        # original place to calculate attention
+        print("input to original 'compute_attn_matrix'")
+        print(f"delta: {type(delta), delta.shape}")
+        print(f"delta_bias: {type(delta_bias), delta_bias.shape}")
+        print(f"A: {type(A), A.shape}")
+        print(f"B: {type(B), B.shape}")
+        print(f"C: {type(C), C.shape}")
+        print(f"L: {type(L), L}")
+        print(f"x.shape: {type(x), x.shape}")
+
+        # for "calculate attn matrix"
+        dt = F.softplus(delta + delta_bias.unsqueeze(0).unsqueeze(-1))
+        print(f"dt: {type(dt), dt.shape}")
+
+        # attention matrix calculation and conversion
+        attn_mat = compute_attn_matrix_fn(
+            delta.to(torch.float32), 
+            delta_bias.to(torch.float32), 
+            A.to(torch.float32), 
+            B.to(torch.float32), 
+            C.to(torch.float32), 
+            L, 
+            x.shape, 
+            dtype=torch.float32
+        )
+        M = conv2Mat(conv1d_weight, x.shape[-1]).to(x.device).transpose(-1,-2)
+        gate = torch.diag_embed(F.silu(z)).to(torch.float32)
+        conv1d_out_no_act = causal_conv1d_cuda.causal_conv1d_fwd(
+            x, conv1d_weight, conv1d_bias, None, None, None, False
+        )
+        Z = torch.diag_embed(torch.sigmoid(conv1d_out_no_act)).to(torch.float32)
+        
+        attn_mat_fin = gate @ attn_mat @ Z @ M.to(attn_mat.device)
+        print(f"attn_mat_fin: {type(attn_mat_fin), attn_mat_fin.shape}")
+
         ctx.delta_softplus = delta_softplus
         ctx.out_proj_bias_is_None = out_proj_bias is None
         ctx.checkpoint_lvl = checkpoint_lvl

@@ -214,6 +214,12 @@ class Mamba2(nn.Module, PyTorchModelHubMixin):
                 ngroups=self.ngroups,
                 norm_before_gate=self.norm_before_gate,
                 **dt_limit_kwargs,
+                # -- compute attn matrix
+                compute_attn_matrix = self.compute_attn_matrix,
+                old_attention = self.old_attention,
+                compute_attn_vector = self.compute_attn_vector,
+                ablate_attn_mat = self.ablate_attn_mat,
+                ablate_attn_vec = self.ablate_attn_vec
             )
             if seqlen_og is not None:
                 out = rearrange(out, "b l d -> (b l) d")
