@@ -310,6 +310,7 @@ def _mamba_chunk_scan_combined_fwd(x, dt, A, B, C, chunk_size, D=None, z=None, d
     # dA_cumsum_tmp1, dt_tmp1 = _chunk_cumsum_fwd(dt[:, 147:], A, chunk_size, dt_bias=dt_bias, dt_softplus=dt_softplus)
     # dA_cumsum_tmp2, dt_tmp2 = _chunk_cumsum_fwd(dt[:, 147:256], A, chunk_size, dt_bias=dt_bias, dt_softplus=dt_softplus)
     dA_cumsum, dt = _chunk_cumsum_fwd(dt, A, chunk_size, dt_bias=dt_bias, dt_softplus=dt_softplus, dt_limit=dt_limit)
+    print(f"dA_cumsum {type(dA_cumsum), {dA_cumsum.shape}}")
     states = _chunk_state_fwd(B, x, dt, dA_cumsum, seq_idx=seq_idx, states_in_fp32=True)
     # states_tmp0 = _chunk_state_fwd(B[:, :147], x[:, :147], dt_tmp0, dA_cumsum_tmp0, states_in_fp32=True)
     # states_tmp1 = _chunk_state_fwd(B[:, 147:], x[:, 147:], dt_tmp1, dA_cumsum_tmp1, states_in_fp32=True)
@@ -750,6 +751,25 @@ def mamba_conv1d_scan_ref(xBC, conv1d_weight, conv1d_bias, dt, A, chunk_size, D=
     out = ssd_selective_scan(x, dt.to(x.dtype), A, B, C, D=D.float(), z=z, dt_bias=dt_bias, dt_softplus=dt_softplus, dt_limit=dt_limit)
     return rearrange(out, "b s h p -> b s (h p)")
 
+from mamba_ssm.modules.ssd_minimal import segsum
+def compute_attn_m2(dt, dt_bias, A, B, C, L, x_shape):
+    
+    print("input to m2's 'compute_attn_matrix'")
+    print(f"dt: {type(dt), dt.shape}")
+    print(f"dt_bias: {type(dt_bias), dt_bias.shape}")
+    print(f"A: {type(A), A.shape}")
+    print(f"B: {type(B), B.shape}")
+    print(f"C: {type(C), C.shape}")
+    print(f"L: {type(L), L}")
+    print(f"x.shape: {x_shape}")
+
+    dt = F.softplus(dt + dt_bias.unsqueeze(0).unsqueeze(0))
+    dA = torch.exp(torch.einsum("blh,h->bhl",dt,A))
+    L = segsum(dA) # [b, h, l, l]
+    cbt = torch.einsum("blgn,bsgn->bgsl",C,B) # [b, g, l, l]
+
+    attn_mat = torch.einsum("bhij,bgij->bghij",L,cbt) # broadcast over head and group
+    print(f"attn_mat:{attn_mat.shape}")
 
 class MambaSplitConv1dScanCombinedFn(torch.autograd.Function):
 
@@ -788,12 +808,14 @@ class MambaSplitConv1dScanCombinedFn(torch.autograd.Function):
         
         if rmsnorm_weight is None:
             out, out_x, dt_out, dA_cumsum, states, final_states = _mamba_chunk_scan_combined_fwd(x, dt, A, B, C, chunk_size=chunk_size, D=D, z=z, dt_bias=dt_bias, initial_states=initial_states, seq_idx=seq_idx, dt_softplus=True, dt_limit=dt_limit)
+            # print(f"A1: {type(A), A.shape}")
             out = rearrange(out, "b s h p -> b s (h p)")
             rstd = None
             if d_nonssm > 0:
                 out = torch.cat([_swiglu_fwd(zx0), out], dim=-1)
         else:
             out_x, _, dt_out, dA_cumsum, states, final_states = _mamba_chunk_scan_combined_fwd(x, dt, A, B, C, chunk_size=chunk_size, D=D, z=None, dt_bias=dt_bias, initial_states=initial_states, seq_idx=seq_idx, dt_softplus=True, dt_limit=dt_limit)
+            # print(f"A2: {type(A), A.shape}")
             # reshape input data into 2D tensor
             x_rms = rearrange(out_x, "b s h p -> (b s) (h p)")
             z_rms = rearrange(z, "b s h p -> (b s) (h p)")
@@ -824,14 +846,9 @@ class MambaSplitConv1dScanCombinedFn(torch.autograd.Function):
                               out_x, A, D, dt_bias, initial_states, seq_idx, rmsnorm_weight, rstd, outproj_weight, outproj_bias)
         
         # assume all parameters are calculated here
-        print("input to m2's 'compute_attn_matrix'")
-        print(f"dt: {type(dt), dt.shape}")
-        print(f"dt_bias: {type(dt_bias), dt_bias.shape}")
-        print(f"A: {type(A), A.shape}")
-        print(f"B: {type(B), B.shape}")
-        print(f"C: {type(C), C.shape}")
-        # print(f"L: {type(L), L}")
-        print(f"x.shape: {type(x), x.shape}")
+        attn_matrix = compute_attn_m2(dt, dt_bias, A, B, C, 32, x.shape)
+
+
 
         ctx.dt_limit = dt_limit
         ctx.return_final_states = return_final_states

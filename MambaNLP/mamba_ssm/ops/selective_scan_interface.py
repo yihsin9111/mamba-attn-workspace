@@ -180,6 +180,8 @@ def selective_scan_ref(u, delta, A, B, C, D=None, z=None, delta_bias=None, delta
 
 def compute_attn_matrix_fn(delta, delta_bias, A, B, C, L, x_shape, dtype=torch.float32):
     dt = F.softplus(delta + delta_bias.unsqueeze(0).unsqueeze(-1))
+    # print(f"in compute attn matrix: dt, {delta.shape}; dt_bias, {delta_bias.unsqueeze(0).unsqueeze(-1).shape}")
+    # print(f"dt: {dt.shape}")
     dA = torch.exp(torch.einsum("bdl,dn->bldn", dt, A))
     dB = torch.einsum("bdl,bnl->bldn", dt, B.squeeze(1))
     AttnMatrixOverCLS = torch.zeros((x_shape[0], x_shape[1], x_shape[2], x_shape[2]),requires_grad=True).to(dtype).to(dA.device) #BHLL: L vectors per batch and channel

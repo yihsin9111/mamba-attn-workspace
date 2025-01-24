@@ -75,6 +75,8 @@ def _chunk_cumsum_fwd_kernel(
     dt = tl.where((offs_h[:, None] < nheads) & (offs_c[None, :] < chunk_size_limit), dt, 0.0)
     tl.store(dt_out_ptrs, dt, mask=(offs_h[:, None] < nheads) & (offs_c[None, :] < chunk_size))
     A = tl.load(A_ptrs, mask=offs_h < nheads, other=0.0).to(tl.float32)
+    # test
+    # print(f"Ainchunkstate: {A}")
     dA = dt * A[:, None]
     dA_cs = tl.cumsum(dA, axis=1)
     tl.store(dA_cs_ptrs, dA_cs, mask=(offs_h[:, None] < nheads) & (offs_c[None, :] < chunk_size))
@@ -668,6 +670,7 @@ def _chunk_cumsum_fwd(dt, A, chunk_size, dt_bias=None, dt_softplus=False, dt_lim
     if dt_bias is not None:
         assert dt_bias.shape == (nheads,)
     nchunks = math.ceil(seqlen / chunk_size)
+    print(f"in chunk cumsum forward: dt {dt.shape}, A {A.shape}, chunk size {chunk_size}, nchunks {nchunks}")
     dt_out = torch.empty(batch, nheads, nchunks, chunk_size, device=dt.device, dtype=torch.float32)
     dA_cumsum = torch.empty(batch, nheads, nchunks, chunk_size, device=dt.device, dtype=torch.float32)
     grid_chunk_cs = lambda META: (batch, nchunks, triton.cdiv(nheads, META['BLOCK_SIZE_H']))
