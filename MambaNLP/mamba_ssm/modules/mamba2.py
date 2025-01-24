@@ -78,6 +78,8 @@ class Mamba2(nn.Module, PyTorchModelHubMixin):
         self.old_attention = old_attention
         self.compute_attn_vector = compute_attn_vector
         self.ablate_attn_mat = ablate_attn_mat
+        # for recording attn matrix
+        self.attn_matrix = None
 
         self.d_model = d_model
         self.d_state = d_state
@@ -196,7 +198,7 @@ class Mamba2(nn.Module, PyTorchModelHubMixin):
         dt_limit_kwargs = {} if self.dt_limit == (0.0, float("inf")) else dict(dt_limit=self.dt_limit)
         if self.use_mem_eff_path and inference_params is None:
             # print("using mem eff path")
-            out = mamba_split_conv1d_scan_combined(
+            out, self.attn_matrix = mamba_split_conv1d_scan_combined(
                 zxbcdt,
                 rearrange(self.conv1d.weight, "d 1 w -> d w"),
                 self.conv1d.bias,

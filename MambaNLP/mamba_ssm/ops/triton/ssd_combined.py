@@ -310,7 +310,7 @@ def _mamba_chunk_scan_combined_fwd(x, dt, A, B, C, chunk_size, D=None, z=None, d
     # dA_cumsum_tmp1, dt_tmp1 = _chunk_cumsum_fwd(dt[:, 147:], A, chunk_size, dt_bias=dt_bias, dt_softplus=dt_softplus)
     # dA_cumsum_tmp2, dt_tmp2 = _chunk_cumsum_fwd(dt[:, 147:256], A, chunk_size, dt_bias=dt_bias, dt_softplus=dt_softplus)
     dA_cumsum, dt = _chunk_cumsum_fwd(dt, A, chunk_size, dt_bias=dt_bias, dt_softplus=dt_softplus, dt_limit=dt_limit)
-    print(f"dA_cumsum {type(dA_cumsum), {dA_cumsum.shape}}")
+    #print(f"dA_cumsum {type(dA_cumsum), {dA_cumsum.shape}}")
     states = _chunk_state_fwd(B, x, dt, dA_cumsum, seq_idx=seq_idx, states_in_fp32=True)
     # states_tmp0 = _chunk_state_fwd(B[:, :147], x[:, :147], dt_tmp0, dA_cumsum_tmp0, states_in_fp32=True)
     # states_tmp1 = _chunk_state_fwd(B[:, 147:], x[:, 147:], dt_tmp1, dA_cumsum_tmp1, states_in_fp32=True)
@@ -754,22 +754,13 @@ def mamba_conv1d_scan_ref(xBC, conv1d_weight, conv1d_bias, dt, A, chunk_size, D=
 from mamba_ssm.modules.ssd_minimal import segsum
 def compute_attn_m2(dt, dt_bias, A, B, C, L, x_shape):
     
-    print("input to m2's 'compute_attn_matrix'")
-    print(f"dt: {type(dt), dt.shape}")
-    print(f"dt_bias: {type(dt_bias), dt_bias.shape}")
-    print(f"A: {type(A), A.shape}")
-    print(f"B: {type(B), B.shape}")
-    print(f"C: {type(C), C.shape}")
-    print(f"L: {type(L), L}")
-    print(f"x.shape: {x_shape}")
-
     dt = F.softplus(dt + dt_bias.unsqueeze(0).unsqueeze(0))
     dA = torch.exp(torch.einsum("blh,h->bhl",dt,A))
     L = segsum(dA) # [b, h, l, l]
     cbt = torch.einsum("blgn,bsgn->bgsl",C,B) # [b, g, l, l]
 
     attn_mat = torch.einsum("bhij,bgij->bghij",L,cbt) # broadcast over head and group
-    print(f"attn_mat:{attn_mat.shape}")
+    return attn_mat
 
 class MambaSplitConv1dScanCombinedFn(torch.autograd.Function):
 
@@ -858,6 +849,8 @@ class MambaSplitConv1dScanCombinedFn(torch.autograd.Function):
         ctx.chunk_size = chunk_size
         ctx.headdim = headdim
         ctx.ngroups = ngroups
+
+        out = out, attn_matrix
         return out if not return_final_states else (out, final_states)
 
     @staticmethod

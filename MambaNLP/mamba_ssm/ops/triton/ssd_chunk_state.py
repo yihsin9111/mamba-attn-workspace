@@ -670,7 +670,7 @@ def _chunk_cumsum_fwd(dt, A, chunk_size, dt_bias=None, dt_softplus=False, dt_lim
     if dt_bias is not None:
         assert dt_bias.shape == (nheads,)
     nchunks = math.ceil(seqlen / chunk_size)
-    print(f"in chunk cumsum forward: dt {dt.shape}, A {A.shape}, chunk size {chunk_size}, nchunks {nchunks}")
+    # print(f"in chunk cumsum forward: dt {dt.shape}, A {A.shape}, chunk size {chunk_size}, nchunks {nchunks}")
     dt_out = torch.empty(batch, nheads, nchunks, chunk_size, device=dt.device, dtype=torch.float32)
     dA_cumsum = torch.empty(batch, nheads, nchunks, chunk_size, device=dt.device, dtype=torch.float32)
     grid_chunk_cs = lambda META: (batch, nchunks, triton.cdiv(nheads, META['BLOCK_SIZE_H']))
