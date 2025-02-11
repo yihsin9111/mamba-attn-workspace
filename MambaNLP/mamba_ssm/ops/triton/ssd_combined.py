@@ -752,14 +752,25 @@ def mamba_conv1d_scan_ref(xBC, conv1d_weight, conv1d_bias, dt, A, chunk_size, D=
     return rearrange(out, "b s h p -> b s (h p)")
 
 from mamba_ssm.modules.ssd_minimal import segsum
-def compute_attn_m2(dt, dt_bias, A, B, C, L, x_shape):
+def compute_attn_m2(dt, dt_bias, A, B, C, x):
     
     dt = F.softplus(dt + dt_bias.unsqueeze(0).unsqueeze(0))
     dA = torch.exp(torch.einsum("blh,h->bhl",dt,A))
     L = segsum(dA) # [b, h, l, l]
     cbt = torch.einsum("blgn,bsgn->bgsl",C,B) # [b, g, l, l]
 
-    attn_mat = torch.einsum("bhij,bgij->bghij",L,cbt) # broadcast over head and group
+    # attn_mat = torch.einsum("bhij,bgij->bghij",L,cbt) # broadcast over head and group
+    
+    # calculate attention matrix with convolution and rms norm
+    x_flat      = x.view(x.shape[0], x.shape[1], x.shape[2]*x.shape[3])
+    rms_values  = torch.sqrt(torch.mean(x_flat**2, dim=-1)) # rms value along feature dimension
+    rms_inv     = 1/rms_values
+    rms_inv_diag = torch.diag_embed(rms_inv)
+
+    # 
+    rms_inv_diag_expanded = rms_inv_diag.unsqueeze(1).expand(-1, group, -1, -1)
+    result = torch.matmul(rms_inv_diag_expanded)
+
     return attn_mat
 
 class MambaSplitConv1dScanCombinedFn(torch.autograd.Function):
@@ -793,6 +804,7 @@ class MambaSplitConv1dScanCombinedFn(torch.autograd.Function):
         )
         x, B, C = torch.split(xBC_conv, [dim, ngroups * dstate, ngroups * dstate], dim=-1)
         x = rearrange(x, "b l (h p) -> b l h p", h=nheads)
+        print(f"x_shape: {x.shape}")
         B = rearrange(B, "b l (g n) -> b l g n", g=ngroups)
         C = rearrange(C, "b l (g n) -> b l g n", g=ngroups)
         z = rearrange(z, "b l (h p) -> b l h p", h=nheads) if z is not None else None
@@ -837,7 +849,7 @@ class MambaSplitConv1dScanCombinedFn(torch.autograd.Function):
                               out_x, A, D, dt_bias, initial_states, seq_idx, rmsnorm_weight, rstd, outproj_weight, outproj_bias)
         
         # assume all parameters are calculated here
-        attn_matrix = compute_attn_m2(dt, dt_bias, A, B, C, 32, x.shape)
+        attn_matrix = compute_attn_m2(dt, dt_bias, A, B, C, x)
 
 
 
